@@ -22,7 +22,7 @@ class Habit(TimeStampedModel):
     active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ["created_at", "name"]
         constraints = [
             models.UniqueConstraint(
                 fields=["user", "name"],
@@ -42,7 +42,7 @@ class DailyHabit(TimeStampedModel):
     notes = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        ordering = ["date", "name"]
+        ordering = ["date", "created_at", "name"]
         constraints = [
             models.UniqueConstraint(
                 fields=["user", "name", "date"],
@@ -265,7 +265,9 @@ def create_habits_for_user_on_date(user, date):
         return DailyHabit.objects.none()
 
     active_habit_names = list(
-        Habit.objects.filter(user=user, active=True).values_list("name", flat=True)
+        Habit.objects.filter(user=user, active=True)
+        .order_by("created_at", "name")
+        .values_list("name", flat=True)
     )
     if not active_habit_names:
         return DailyHabit.objects.none()
@@ -275,7 +277,19 @@ def create_habits_for_user_on_date(user, date):
         for name in active_habit_names
     ]
     DailyHabit.objects.bulk_create(habits, ignore_conflicts=True)
-    return DailyHabit.objects.filter(user=user, date=date, name__in=active_habit_names)
+    habit_order = models.Case(
+        *[
+            models.When(name=name, then=models.Value(position))
+            for position, name in enumerate(active_habit_names)
+        ],
+        default=models.Value(len(active_habit_names)),
+        output_field=models.IntegerField(),
+    )
+    return (
+        DailyHabit.objects.filter(user=user, date=date, name__in=active_habit_names)
+        .annotate(habit_order=habit_order)
+        .order_by("habit_order", "name")
+    )
 
 
 def create_today_habits_for_user(user):
