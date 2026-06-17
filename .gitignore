@@ -1,10 +1,12 @@
 .env
+.backup.env
 .idea/
 *.pyc
 __pycache__/
 db.sqlite3
 media/
 staticfiles/
+backups/
 .venv/
 venv/
 .DS_Store
