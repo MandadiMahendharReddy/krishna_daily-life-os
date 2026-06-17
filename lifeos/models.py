@@ -98,9 +98,11 @@ class TodoItem(TimeStampedModel):
 class MoneyAccount(TimeStampedModel):
     ACCOUNT_CASH = "cash"
     ACCOUNT_BANK = "bank"
+    ACCOUNT_CREDIT_CARD = "credit_card"
     ACCOUNT_CHOICES = [
         (ACCOUNT_CASH, "Cash"),
         (ACCOUNT_BANK, "Bank"),
+        (ACCOUNT_CREDIT_CARD, "Credit Card"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="money_accounts")
@@ -120,6 +122,20 @@ class MoneyAccount(TimeStampedModel):
 
     def __str__(self):
         return f"{self.name} - {self.get_account_type_display()}"
+
+    @property
+    def credit_card_status(self):
+        if self.account_type != self.ACCOUNT_CREDIT_CARD:
+            return ""
+        if self.balance < 0:
+            return "Outstanding"
+        if self.balance > 0:
+            return "Extra Payment"
+        return "Paid"
+
+    @property
+    def credit_card_display_amount(self):
+        return abs(self.balance)
 
 
 class Expense(TimeStampedModel):
@@ -159,10 +175,12 @@ class AccountTransaction(TimeStampedModel):
     TYPE_CREDIT = "credit"
     TYPE_EXPENSE = "expense"
     TYPE_TRANSFER = "transfer"
+    TYPE_CREDIT_CARD_PAYMENT = "credit_card_payment"
     TYPE_CHOICES = [
         (TYPE_CREDIT, "Credit"),
         (TYPE_EXPENSE, "Expense"),
         (TYPE_TRANSFER, "Transfer"),
+        (TYPE_CREDIT_CARD_PAYMENT, "Credit Card Payment"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="account_transactions")

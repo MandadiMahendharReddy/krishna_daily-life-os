@@ -79,11 +79,17 @@ class MoneyAccountForm(BootstrapFormMixin, forms.ModelForm):
     def clean_name(self):
         return " ".join(self.cleaned_data["name"].split())
 
-    def clean_balance(self):
-        balance = self.cleaned_data["balance"]
-        if balance < 0:
-            raise forms.ValidationError("Balance cannot be negative.")
-        return balance
+    def clean(self):
+        cleaned_data = super().clean()
+        account_type = cleaned_data.get("account_type")
+        balance = cleaned_data.get("balance")
+        if (
+            account_type != MoneyAccount.ACCOUNT_CREDIT_CARD
+            and balance is not None
+            and balance < 0
+        ):
+            self.add_error("balance", "Cash and bank balances cannot be negative.")
+        return cleaned_data
 
 
 class AccountCreditForm(BootstrapFormMixin, forms.Form):
@@ -112,7 +118,10 @@ class AccountCreditForm(BootstrapFormMixin, forms.Form):
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         if user is not None:
-            self.fields["to_account"].queryset = MoneyAccount.objects.filter(user=user, active=True)
+            self.fields["to_account"].queryset = MoneyAccount.objects.filter(
+                user=user,
+                active=True,
+            ).exclude(account_type=MoneyAccount.ACCOUNT_CREDIT_CARD)
 
     def clean_amount(self):
         amount = self.cleaned_data["amount"]
@@ -132,7 +141,9 @@ class AccountTransferForm(BootstrapFormMixin, forms.Form):
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         if user is not None:
-            accounts = MoneyAccount.objects.filter(user=user, active=True)
+            accounts = MoneyAccount.objects.filter(user=user, active=True).exclude(
+                account_type=MoneyAccount.ACCOUNT_CREDIT_CARD
+            )
             self.fields["from_account"].queryset = accounts
             self.fields["to_account"].queryset = accounts
 
@@ -154,6 +165,54 @@ class AccountTransferForm(BootstrapFormMixin, forms.Form):
         return cleaned_data
 
 
+class CreditCardPaymentForm(BootstrapFormMixin, forms.Form):
+    credit_card = forms.ModelChoiceField(
+        queryset=MoneyAccount.objects.none(),
+        label="Credit card",
+    )
+    pay_from_account = forms.ModelChoiceField(
+        queryset=MoneyAccount.objects.none(),
+        label="Pay from account",
+    )
+    amount = forms.DecimalField(max_digits=12, decimal_places=2)
+    occurred_on = forms.DateField(widget=DateInput(), initial=timezone.localdate, label="Date")
+    notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 2}), required=False)
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if user is not None:
+            active_accounts = MoneyAccount.objects.filter(user=user, active=True)
+            self.fields["credit_card"].queryset = active_accounts.filter(
+                account_type=MoneyAccount.ACCOUNT_CREDIT_CARD
+            )
+            self.fields["pay_from_account"].queryset = active_accounts.exclude(
+                account_type=MoneyAccount.ACCOUNT_CREDIT_CARD
+            )
+
+    def clean_amount(self):
+        amount = self.cleaned_data["amount"]
+        if amount <= 0:
+            raise forms.ValidationError("Amount must be greater than zero.")
+        return amount
+
+    def clean(self):
+        cleaned_data = super().clean()
+        credit_card = cleaned_data.get("credit_card")
+        pay_from_account = cleaned_data.get("pay_from_account")
+        amount = cleaned_data.get("amount")
+
+        if credit_card is not None and credit_card.account_type != MoneyAccount.ACCOUNT_CREDIT_CARD:
+            self.add_error("credit_card", "Choose a credit card account.")
+        if (
+            pay_from_account is not None
+            and pay_from_account.account_type == MoneyAccount.ACCOUNT_CREDIT_CARD
+        ):
+            self.add_error("pay_from_account", "Payment must come from cash or a bank account.")
+        if pay_from_account is not None and amount is not None and amount > pay_from_account.balance:
+            self.add_error("amount", "Amount is more than the selected account balance.")
+        return cleaned_data
+
+
 class TodoForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = TodoItem
@@ -168,7 +227,7 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         if user is not None:
             queryset = MoneyAccount.objects.filter(user=user, active=True)
         self.fields["account"].queryset = queryset
-        self.fields["account"].empty_label = "Choose cash/bank account"
+        self.fields["account"].empty_label = "Choose an account"
         self.fields["account"].required = True
 
     class Meta:
@@ -187,7 +246,12 @@ class ExpenseForm(BootstrapFormMixin, forms.ModelForm):
         cleaned_data = super().clean()
         account = cleaned_data.get("account")
         amount = cleaned_data.get("amount")
-        if account is not None and amount is not None and amount > account.balance:
+        if (
+            account is not None
+            and account.account_type != MoneyAccount.ACCOUNT_CREDIT_CARD
+            and amount is not None
+            and amount > account.balance
+        ):
             self.add_error("amount", "Amount is more than the selected account balance.")
         return cleaned_data
 

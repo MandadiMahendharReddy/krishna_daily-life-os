@@ -4,7 +4,7 @@
 <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
   <div>
     <h1 class="mb-1">Expenses</h1>
-    <p class="text-muted mb-0">Track cash, bank accounts, expenses, credits, and transfers.</p>
+    <p class="text-muted mb-0">Track cash, bank accounts, credit cards, expenses, credits, and transfers.</p>
   </div>
   <div class="d-flex flex-wrap gap-2 align-self-lg-start">
     <a class="btn btn-outline-primary" href="{% url 'export_transactions_csv' %}">Download Transactions</a>
@@ -45,6 +45,14 @@
       </div>
     </div>
   </div>
+  <div class="col-6 col-lg-3">
+    <div class="card app-card metric-card">
+      <div class="card-body">
+        <p class="text-muted mb-1">Credit Card Outstanding</p>
+        <h2>₹{{ credit_card_outstanding|floatformat:2 }}</h2>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="row g-3 mb-4">
@@ -60,7 +68,26 @@
             <button class="btn btn-primary w-100" type="submit">Save Expense</button>
           </form>
         {% else %}
-          <p class="text-muted mb-0">Add cash or bank balance first.</p>
+          <p class="text-muted mb-0">Add an account first.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card app-card h-100">
+      <div class="card-body">
+        <h2 class="h5">Pay Credit Card Bill</h2>
+        {% if credit_card_accounts and payment_source_accounts %}
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="pay_credit_card">
+            {{ credit_card_payment_form.as_p }}
+            <button class="btn btn-outline-primary w-100" type="submit">Pay Bill</button>
+          </form>
+        {% elif not credit_card_accounts %}
+          <p class="text-muted mb-0">Add a credit card account first.</p>
+        {% else %}
+          <p class="text-muted mb-0">Add cash or a bank account to pay the bill.</p>
         {% endif %}
       </div>
     </div>
@@ -69,7 +96,7 @@
     <div class="card app-card h-100">
       <div class="card-body">
         <h2 class="h5">Credit Account</h2>
-        {% if money_accounts %}
+        {% if payment_source_accounts %}
           <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="credit_account">
@@ -86,7 +113,7 @@
     <div class="card app-card h-100">
       <div class="card-body">
         <h2 class="h5">Transfer / Withdraw</h2>
-        {% if money_accounts|length > 1 %}
+        {% if payment_source_accounts|length > 1 %}
           <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="transfer_account">
@@ -126,7 +153,17 @@
               <small class="text-muted">{{ account.get_account_type_display }}</small>
             </div>
             <div class="text-end">
-              <strong class="d-block">₹{{ account.balance|floatformat:2 }}</strong>
+              {% if account.account_type == "credit_card" %}
+                {% if account.balance < 0 %}
+                  <strong class="d-block text-danger">Outstanding ₹{{ account.credit_card_display_amount|floatformat:2 }}</strong>
+                {% elif account.balance > 0 %}
+                  <strong class="d-block text-success">Extra Payment ₹{{ account.credit_card_display_amount|floatformat:2 }}</strong>
+                {% else %}
+                  <strong class="d-block text-success">Paid</strong>
+                {% endif %}
+              {% else %}
+                <strong class="d-block">₹{{ account.balance|floatformat:2 }}</strong>
+              {% endif %}
               <div class="d-flex gap-2 justify-content-end mt-1">
                 <a class="btn btn-sm btn-outline-secondary" href="{% url 'export_account_transactions_csv' account.pk %}">CSV</a>
                 <form method="post" action="{% url 'remove_money_account' account.pk %}">

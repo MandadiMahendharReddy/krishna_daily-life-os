@@ -14,6 +14,7 @@
   <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Open To-Dos</p><h2>{{ open_todos|length }}</h2></div></div></div>
   <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Monthly Expense</p><h2>₹{{ monthly_expense|floatformat:2 }}</h2></div></div></div>
   <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Money Left</p><h2>₹{{ total_money|floatformat:2 }}</h2></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Credit Card Outstanding</p><h2>₹{{ credit_card_outstanding|floatformat:2 }}</h2></div></div></div>
   <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Study Today</p><h2>{{ study_minutes_today }}m</h2></div></div></div>
 </div>
 

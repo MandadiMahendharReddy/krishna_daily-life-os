@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 from unittest.mock import patch
 
-from .models import AccountTransaction, Habit, MoneyAccount, create_today_habits_for_user
+from .models import AccountTransaction, Expense, Habit, MoneyAccount, create_today_habits_for_user
 from .views import habit_rows_from_uploaded_file, parse_habit_time
 
 
@@ -172,6 +172,275 @@ class MoneyLedgerTests(TestCase):
         self.assertEqual(transaction.transaction_type, AccountTransaction.TYPE_EXPENSE)
         self.assertEqual(transaction.from_account, self.bank)
         self.assertEqual(transaction.amount, Decimal("50.00"))
+
+    def test_credit_card_expense_creates_outstanding_balance(self):
+        credit_card = MoneyAccount.objects.create(
+            user=self.user,
+            name="HDFC Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("0.00"),
+        )
+
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "add_expense",
+                "title": "Petrol",
+                "category": "transport",
+                "amount": "500.00",
+                "account": credit_card.pk,
+                "spent_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        credit_card.refresh_from_db()
+        self.assertEqual(credit_card.balance, Decimal("-500.00"))
+        transaction = AccountTransaction.objects.get(
+            transaction_type=AccountTransaction.TYPE_EXPENSE
+        )
+        self.assertEqual(transaction.from_account, credit_card)
+        self.assertEqual(transaction.amount, Decimal("500.00"))
+
+    def test_credit_card_payment_moves_money_without_increasing_spent(self):
+        credit_card = MoneyAccount.objects.create(
+            user=self.user,
+            name="HDFC Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("0.00"),
+        )
+        self.client.post(
+            "/expenses/",
+            {
+                "action": "add_expense",
+                "title": "Petrol",
+                "category": "transport",
+                "amount": "500.00",
+                "account": credit_card.pk,
+                "spent_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "pay_credit_card",
+                "credit_card": credit_card.pk,
+                "pay_from_account": self.bank.pk,
+                "amount": "500.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "Monthly bill",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        self.bank.refresh_from_db()
+        credit_card.refresh_from_db()
+        self.assertEqual(self.bank.balance, Decimal("500.00"))
+        self.assertEqual(credit_card.balance, Decimal("0.00"))
+        payment = AccountTransaction.objects.get(
+            transaction_type=AccountTransaction.TYPE_CREDIT_CARD_PAYMENT
+        )
+        self.assertEqual(payment.from_account, self.bank)
+        self.assertEqual(payment.to_account, credit_card)
+        self.assertEqual(payment.amount, Decimal("500.00"))
+        self.assertEqual(Expense.objects.count(), 1)
+        expenses_page = self.client.get("/expenses/")
+        self.assertEqual(expenses_page.context["total"], Decimal("500.00"))
+        self.assertContains(expenses_page, "Paid")
+        self.assertEqual(self.client.get("/reports/").context["monthly_expense"], Decimal("500.00"))
+        card_csv = self.client.get(f"/money-accounts/{credit_card.pk}/transactions.csv")
+        self.assertContains(card_csv, "Credit Card Payment")
+
+    def test_credit_card_payment_rejects_credit_card_as_source(self):
+        source_card = MoneyAccount.objects.create(
+            user=self.user,
+            name="ICICI Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("200.00"),
+        )
+        target_card = MoneyAccount.objects.create(
+            user=self.user,
+            name="HDFC Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("-200.00"),
+        )
+
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "pay_credit_card",
+                "credit_card": target_card.pk,
+                "pay_from_account": source_card.pk,
+                "amount": "100.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select a valid choice")
+        self.assertFalse(
+            AccountTransaction.objects.filter(
+                transaction_type=AccountTransaction.TYPE_CREDIT_CARD_PAYMENT
+            ).exists()
+        )
+
+    def test_credit_card_payment_rejects_non_card_target_and_zero_amount(self):
+        MoneyAccount.objects.create(
+            user=self.user,
+            name="Valid Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("0.00"),
+        )
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "pay_credit_card",
+                "credit_card": self.bank.pk,
+                "pay_from_account": self.cash.pk,
+                "amount": "0.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select a valid choice")
+        self.assertContains(response, "Amount must be greater than zero")
+        self.assertFalse(
+            AccountTransaction.objects.filter(
+                transaction_type=AccountTransaction.TYPE_CREDIT_CARD_PAYMENT
+            ).exists()
+        )
+
+    def test_credit_card_payment_can_create_extra_payment(self):
+        credit_card = MoneyAccount.objects.create(
+            user=self.user,
+            name="HDFC Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("-100.00"),
+        )
+
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "pay_credit_card",
+                "credit_card": credit_card.pk,
+                "pay_from_account": self.bank.pk,
+                "amount": "200.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        credit_card.refresh_from_db()
+        self.assertEqual(credit_card.balance, Decimal("100.00"))
+        page = self.client.get("/expenses/")
+        self.assertContains(page, "Extra Payment ₹100.00")
+
+    def test_dashboard_sums_only_negative_credit_card_balances(self):
+        MoneyAccount.objects.create(
+            user=self.user,
+            name="HDFC Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("-1000.00"),
+        )
+        MoneyAccount.objects.create(
+            user=self.user,
+            name="ICICI Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("-500.00"),
+        )
+        MoneyAccount.objects.create(
+            user=self.user,
+            name="Paid Ahead Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("200.00"),
+        )
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.context["credit_card_outstanding"], Decimal("1500.00"))
+        self.assertEqual(response.context["total_money"], Decimal("1100.00"))
+
+    def test_credit_card_account_accepts_negative_opening_balance(self):
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "save_account",
+                "name": "Opening Card",
+                "account_type": MoneyAccount.ACCOUNT_CREDIT_CARD,
+                "balance": "-250.00",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        account = MoneyAccount.objects.get(name="Opening Card")
+        self.assertEqual(account.balance, Decimal("-250.00"))
+        self.assertEqual(account.credit_card_status, "Outstanding")
+
+    def test_reports_total_spent_excludes_credit_transfer_and_card_payment(self):
+        credit_card = MoneyAccount.objects.create(
+            user=self.user,
+            name="HDFC Credit Card",
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+            balance=Decimal("-50.00"),
+        )
+        self.client.post(
+            "/expenses/",
+            {
+                "action": "add_expense",
+                "title": "Food",
+                "category": "food",
+                "amount": "100.00",
+                "account": self.bank.pk,
+                "spent_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+        self.client.post(
+            "/expenses/",
+            {
+                "action": "credit_account",
+                "title": "Salary",
+                "to_account": self.bank.pk,
+                "amount": "1000.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+        self.client.post(
+            "/expenses/",
+            {
+                "action": "transfer_account",
+                "title": "ATM withdrawal",
+                "from_account": self.bank.pk,
+                "to_account": self.cash.pk,
+                "amount": "100.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+        self.client.post(
+            "/expenses/",
+            {
+                "action": "pay_credit_card",
+                "credit_card": credit_card.pk,
+                "pay_from_account": self.bank.pk,
+                "amount": "50.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        reports_page = self.client.get("/reports/")
+        expenses_page = self.client.get("/expenses/")
+        self.assertEqual(reports_page.context["monthly_expense"], Decimal("100.00"))
+        self.assertEqual(expenses_page.context["total"], Decimal("100.00"))
 
     def test_credit_adds_to_selected_account_and_creates_transaction(self):
         response = self.client.post(

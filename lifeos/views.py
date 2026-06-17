@@ -14,6 +14,7 @@ from django.utils import timezone
 from .forms import (
     AccountCreditForm,
     AccountTransferForm,
+    CreditCardPaymentForm,
     CreditCardForm,
     ExpenseForm,
     HabitForm,
@@ -202,6 +203,28 @@ def create_expense_transaction(expense):
     )
 
 
+def expense_transaction_total(user, start_date=None, end_date=None):
+    transactions = AccountTransaction.objects.filter(
+        user=user,
+        transaction_type=AccountTransaction.TYPE_EXPENSE,
+    )
+    if start_date is not None:
+        transactions = transactions.filter(occurred_on__gte=start_date)
+    if end_date is not None:
+        transactions = transactions.filter(occurred_on__lte=end_date)
+    return transactions.aggregate(total=Sum("amount"))["total"] or 0
+
+
+def credit_card_outstanding_for_user(user):
+    balances = MoneyAccount.objects.filter(
+        user=user,
+        active=True,
+        account_type=MoneyAccount.ACCOUNT_CREDIT_CARD,
+        balance__lt=0,
+    ).values_list("balance", flat=True)
+    return sum((-balance for balance in balances), 0)
+
+
 def register(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
@@ -231,13 +254,12 @@ def dashboard(request):
         "habit_score": habit_score,
         "habit_start_date": habit_settings.start_date,
         "habits_tracking_started": today >= habit_settings.start_date,
-        "total_money": money_accounts.aggregate(total=Sum("balance"))["total"] or 0,
+        "total_money": money_accounts.exclude(
+            account_type=MoneyAccount.ACCOUNT_CREDIT_CARD
+        ).aggregate(total=Sum("balance"))["total"] or 0,
         "open_todos": TodoItem.objects.filter(user=request.user, completed=False)[:5],
-        "monthly_expense": Expense.objects.filter(
-            user=request.user,
-            spent_on__gte=month_start,
-            spent_on__lte=today,
-        ).aggregate(total=Sum("amount"))["total"] or 0,
+        "monthly_expense": expense_transaction_total(request.user, month_start, today),
+        "credit_card_outstanding": credit_card_outstanding_for_user(request.user),
         "study_minutes_today": StudySession.objects.filter(
             user=request.user,
             studied_on=today,
@@ -421,6 +443,7 @@ def expenses(request):
     account_form = MoneyAccountForm()
     credit_form = AccountCreditForm(user=request.user)
     transfer_form = AccountTransferForm(user=request.user)
+    credit_card_payment_form = CreditCardPaymentForm(user=request.user)
 
     if request.method == "POST":
         action = request.POST.get("action", "add_expense")
@@ -490,6 +513,56 @@ def expenses(request):
                 if transfer_saved:
                     messages.success(request, "Transfer saved and account balances updated.")
                     return redirect("expenses")
+        elif action == "pay_credit_card":
+            credit_card_payment_form = CreditCardPaymentForm(request.POST, user=request.user)
+            if credit_card_payment_form.is_valid():
+                amount = credit_card_payment_form.cleaned_data["amount"]
+                payment_saved = False
+                with transaction.atomic():
+                    pay_from_account = MoneyAccount.objects.select_for_update().get(
+                        pk=credit_card_payment_form.cleaned_data["pay_from_account"].pk,
+                        user=request.user,
+                        active=True,
+                    )
+                    credit_card = MoneyAccount.objects.select_for_update().get(
+                        pk=credit_card_payment_form.cleaned_data["credit_card"].pk,
+                        user=request.user,
+                        active=True,
+                    )
+                    if pay_from_account.account_type == MoneyAccount.ACCOUNT_CREDIT_CARD:
+                        credit_card_payment_form.add_error(
+                            "pay_from_account",
+                            "Payment must come from cash or a bank account.",
+                        )
+                    elif credit_card.account_type != MoneyAccount.ACCOUNT_CREDIT_CARD:
+                        credit_card_payment_form.add_error(
+                            "credit_card",
+                            "Choose a credit card account.",
+                        )
+                    elif amount > pay_from_account.balance:
+                        credit_card_payment_form.add_error(
+                            "amount",
+                            "Amount is more than the selected account balance.",
+                        )
+                    else:
+                        pay_from_account.balance -= amount
+                        credit_card.balance += amount
+                        pay_from_account.save(update_fields=["balance", "updated_at"])
+                        credit_card.save(update_fields=["balance", "updated_at"])
+                        AccountTransaction.objects.create(
+                            user=request.user,
+                            transaction_type=AccountTransaction.TYPE_CREDIT_CARD_PAYMENT,
+                            title="Credit Card Payment",
+                            amount=amount,
+                            from_account=pay_from_account,
+                            to_account=credit_card,
+                            occurred_on=credit_card_payment_form.cleaned_data["occurred_on"],
+                            notes=credit_card_payment_form.cleaned_data["notes"],
+                        )
+                        payment_saved = True
+                if payment_saved:
+                    messages.success(request, "Credit card bill paid and balances updated.")
+                    return redirect("expenses")
         elif action == "add_expense":
             form = ExpenseForm(request.POST, user=request.user)
             if form.is_valid():
@@ -501,7 +574,10 @@ def expenses(request):
                         pk=expense.account.pk,
                         user=request.user,
                     )
-                    if expense.amount > expense.account.balance:
+                    if (
+                        expense.account.account_type != MoneyAccount.ACCOUNT_CREDIT_CARD
+                        and expense.amount > expense.account.balance
+                    ):
                         form.add_error("amount", "Amount is more than the selected account balance.")
                     else:
                         expense.save()
@@ -521,8 +597,15 @@ def expenses(request):
         "from_account",
         "to_account",
     )[:50]
-    total = items.aggregate(total=Sum("amount"))["total"] or 0
-    total_money = sum((account.balance for account in money_accounts), 0)
+    total = expense_transaction_total(request.user)
+    total_money = sum(
+        (
+            account.balance
+            for account in money_accounts
+            if account.account_type != MoneyAccount.ACCOUNT_CREDIT_CARD
+        ),
+        0,
+    )
     cash_balance = sum(
         (account.balance for account in money_accounts if account.account_type == MoneyAccount.ACCOUNT_CASH),
         0,
@@ -539,6 +622,7 @@ def expenses(request):
             "account_form": account_form,
             "credit_form": credit_form,
             "transfer_form": transfer_form,
+            "credit_card_payment_form": credit_card_payment_form,
             "items": items,
             "money_accounts": money_accounts,
             "account_transactions": account_transactions,
@@ -546,6 +630,17 @@ def expenses(request):
             "total_money": total_money,
             "cash_balance": cash_balance,
             "bank_balance": bank_balance,
+            "credit_card_outstanding": credit_card_outstanding_for_user(request.user),
+            "credit_card_accounts": [
+                account
+                for account in money_accounts
+                if account.account_type == MoneyAccount.ACCOUNT_CREDIT_CARD
+            ],
+            "payment_source_accounts": [
+                account
+                for account in money_accounts
+                if account.account_type != MoneyAccount.ACCOUNT_CREDIT_CARD
+            ],
         },
     )
 
@@ -744,7 +839,7 @@ def reports(request):
         {
             "habit_rows": habit_rows,
             "habit_start_date": habit_settings.start_date,
-            "monthly_expense": monthly_expenses.aggregate(total=Sum("amount"))["total"] or 0,
+            "monthly_expense": expense_transaction_total(request.user, month_start, today),
             "expense_account_rows": expense_account_rows,
             "money_accounts": money_accounts,
             "study_rows": study_rows,
