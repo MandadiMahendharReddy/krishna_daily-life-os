@@ -212,3 +212,23 @@ class MoneyLedgerTests(TestCase):
         self.assertContains(response, "Credit Account")
         self.assertContains(response, "Transfer / Withdraw")
         self.assertContains(response, "Download Transactions")
+
+    def test_expenses_page_bank_total_sums_all_bank_accounts(self):
+        MoneyAccount.objects.create(
+            user=self.user,
+            name="Bank2",
+            account_type=MoneyAccount.ACCOUNT_BANK,
+            balance=Decimal("2000.00"),
+        )
+        MoneyAccount.objects.create(
+            user=self.user,
+            name="Bank3",
+            account_type=MoneyAccount.ACCOUNT_BANK,
+            balance=Decimal("3000.00"),
+        )
+
+        response = self.client.get("/expenses/")
+
+        self.assertContains(response, "Bank Total")
+        self.assertContains(response, "₹6000.00")
+        self.assertContains(response, "₹6100.00")

@@ -514,16 +514,23 @@ def expenses(request):
                     return redirect("expenses")
 
     items = Expense.objects.filter(user=request.user).select_related("account")
-    money_accounts = MoneyAccount.objects.filter(user=request.user, active=True).order_by("account_type", "name")
+    money_accounts = list(
+        MoneyAccount.objects.filter(user=request.user, active=True).order_by("account_type", "name")
+    )
     account_transactions = AccountTransaction.objects.filter(user=request.user).select_related(
         "from_account",
         "to_account",
     )[:50]
     total = items.aggregate(total=Sum("amount"))["total"] or 0
-    account_totals = {
-        row["account_type"]: row["total"] or 0
-        for row in money_accounts.values("account_type").annotate(total=Sum("balance"))
-    }
+    total_money = sum((account.balance for account in money_accounts), 0)
+    cash_balance = sum(
+        (account.balance for account in money_accounts if account.account_type == MoneyAccount.ACCOUNT_CASH),
+        0,
+    )
+    bank_balance = sum(
+        (account.balance for account in money_accounts if account.account_type == MoneyAccount.ACCOUNT_BANK),
+        0,
+    )
     return render(
         request,
         "lifeos/expenses.html",
@@ -536,9 +543,9 @@ def expenses(request):
             "money_accounts": money_accounts,
             "account_transactions": account_transactions,
             "total": total,
-            "total_money": money_accounts.aggregate(total=Sum("balance"))["total"] or 0,
-            "cash_balance": account_totals.get(MoneyAccount.ACCOUNT_CASH, 0),
-            "bank_balance": account_totals.get(MoneyAccount.ACCOUNT_BANK, 0),
+            "total_money": total_money,
+            "cash_balance": cash_balance,
+            "bank_balance": bank_balance,
         },
     )
 
