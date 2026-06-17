@@ -165,6 +165,7 @@ class MoneyLedgerTests(TestCase):
         self.assertEqual(self.bank.balance, Decimal("1500.00"))
         transaction = AccountTransaction.objects.get(transaction_type=AccountTransaction.TYPE_CREDIT)
         self.assertEqual(transaction.to_account, self.bank)
+        self.assertEqual(transaction.title, "Salary")
         self.assertEqual(transaction.amount, Decimal("500.00"))
 
     def test_transfer_moves_money_between_accounts_and_creates_transaction(self):
@@ -210,6 +211,8 @@ class MoneyLedgerTests(TestCase):
         response = self.client.get("/expenses/")
 
         self.assertContains(response, "Credit Account")
+        self.assertContains(response, "Interest from Bank")
+        self.assertContains(response, "Refund from Income Tax")
         self.assertContains(response, "Transfer / Withdraw")
         self.assertContains(response, "Download Transactions")
 

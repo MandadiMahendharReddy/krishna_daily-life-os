@@ -87,7 +87,23 @@ class MoneyAccountForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class AccountCreditForm(BootstrapFormMixin, forms.Form):
-    title = forms.CharField(max_length=180, initial="Credit")
+    CREDIT_TYPE_CHOICES = [
+        ("Salary", "Salary"),
+        ("Interest from Bank", "Interest from Bank"),
+        ("Refund from Income Tax", "Refund from Income Tax"),
+        ("Business Income", "Business Income"),
+        ("Freelance Income", "Freelance Income"),
+        ("Bonus", "Bonus"),
+        ("Reimbursement", "Reimbursement"),
+        ("Cash Deposit", "Cash Deposit"),
+        ("Gift", "Gift"),
+        ("Dividend", "Dividend"),
+        ("Rent Received", "Rent Received"),
+        ("Loan Received", "Loan Received"),
+        ("Other Credit", "Other Credit"),
+    ]
+
+    title = forms.ChoiceField(choices=CREDIT_TYPE_CHOICES, label="Credit type", initial="Salary")
     to_account = forms.ModelChoiceField(queryset=MoneyAccount.objects.none(), label="Credit to")
     amount = forms.DecimalField(max_digits=12, decimal_places=2)
     occurred_on = forms.DateField(widget=DateInput(), initial=timezone.localdate, label="Date")
