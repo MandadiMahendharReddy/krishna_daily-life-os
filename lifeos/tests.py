@@ -2,9 +2,11 @@ from datetime import time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
+from unittest.mock import patch
 
 from .models import AccountTransaction, Habit, MoneyAccount, create_today_habits_for_user
 from .views import habit_rows_from_uploaded_file, parse_habit_time
@@ -12,6 +14,30 @@ from .views import habit_rows_from_uploaded_file, parse_habit_time
 
 def uploaded_csv(text):
     return SimpleUploadedFile("habits.csv", text.encode("utf-8"), content_type="text/csv")
+
+
+class BootstrapSuperuserTests(TestCase):
+    @patch.dict(
+        "os.environ",
+        {
+            "DJANGO_SUPERUSER_USERNAME": "site-admin",
+            "DJANGO_SUPERUSER_PASSWORD": "secure-admin-pass",
+            "DJANGO_SUPERUSER_EMAIL": "admin@example.com",
+        },
+    )
+    def test_creates_superuser_from_environment(self):
+        call_command("bootstrap_superuser")
+
+        user = get_user_model().objects.get(username="site-admin")
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.check_password("secure-admin-pass"))
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_skips_when_credentials_are_not_configured(self):
+        call_command("bootstrap_superuser")
+
+        self.assertEqual(get_user_model().objects.count(), 0)
 
 
 class HabitOrderingTests(TestCase):
