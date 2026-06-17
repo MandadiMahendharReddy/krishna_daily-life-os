@@ -63,7 +63,10 @@ class HabitForm(BootstrapFormMixin, forms.ModelForm):
 
 
 class HabitImportForm(BootstrapFormMixin, forms.Form):
-    file = forms.FileField(label="Import habits file")
+    file = forms.FileField(
+        label="Import habits CSV",
+        help_text="Use columns: Habit Name, Start Time, End Time. Example: Wake,3:55 AM,3:56 AM",
+    )
 
 
 class MoneyAccountForm(BootstrapFormMixin, forms.ModelForm):

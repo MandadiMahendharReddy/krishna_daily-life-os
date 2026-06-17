@@ -1,5 +1,5 @@
 import csv
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib import messages
 from django.contrib.auth import login
@@ -44,23 +44,85 @@ def sync_credit_cards_for_user(user):
     return cards
 
 
-def habit_names_from_uploaded_file(uploaded_file):
+HABIT_NAME_HEADERS = {"habit", "habits", "habit_name", "habit name", "name"}
+HABIT_START_HEADERS = {"start", "start_time", "start time", "from", "from_time", "from time"}
+HABIT_END_HEADERS = {"end", "end_time", "end time", "to", "to_time", "to time"}
+
+
+def normalized_csv_header(value):
+    return " ".join(value.strip().lower().replace("_", " ").split())
+
+
+def parse_habit_time(value):
+    value = " ".join(value.strip().upper().replace(".", ":").split())
+    if not value:
+        return None
+
+    for suffix in ("AM", "PM"):
+        value = value.replace(f" {suffix}", suffix)
+    for fmt in ("%I:%M%p", "%I%p", "%H:%M", "%H"):
+        try:
+            return datetime.strptime(value, fmt).time()
+        except ValueError:
+            pass
+    return None
+
+
+def habit_rows_from_uploaded_file(uploaded_file):
     raw_content = uploaded_file.read()
     try:
         text = raw_content.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = raw_content.decode("latin-1")
 
-    names = []
-    for row in csv.reader(text.splitlines()):
-        name = ""
-        for cell in row:
-            name = " ".join(cell.split())
-            if name:
-                break
-        if name and name.lower() not in {"habit", "habits", "habit name", "name"}:
-            names.append(name)
-    return names
+    rows = []
+    reader = csv.reader(text.splitlines())
+    headers = None
+    column_indexes = {"name": 0, "start_time": 1, "end_time": 2}
+
+    for row in reader:
+        if not any(cell.strip() for cell in row):
+            continue
+
+        if headers is None:
+            possible_headers = [normalized_csv_header(cell) for cell in row]
+            has_header = bool(
+                set(possible_headers)
+                & (HABIT_NAME_HEADERS | HABIT_START_HEADERS | HABIT_END_HEADERS)
+            )
+            if has_header:
+                headers = possible_headers
+                for index, header in enumerate(headers):
+                    if header in HABIT_NAME_HEADERS:
+                        column_indexes["name"] = index
+                    elif header in HABIT_START_HEADERS:
+                        column_indexes["start_time"] = index
+                    elif header in HABIT_END_HEADERS:
+                        column_indexes["end_time"] = index
+                continue
+            headers = []
+
+        def cell_at(column_name):
+            index = column_indexes[column_name]
+            if index >= len(row):
+                return ""
+            return " ".join(row[index].split())
+
+        name = cell_at("name")
+        if not name:
+            continue
+
+        start_value = cell_at("start_time")
+        end_value = cell_at("end_time")
+        rows.append(
+            {
+                "name": name,
+                "start_time": parse_habit_time(start_value) if start_value else None,
+                "end_time": parse_habit_time(end_value) if end_value else None,
+                "has_schedule": bool(start_value or end_value),
+            }
+        )
+    return rows
 
 
 def save_habit_for_user(user, name, start_time=None, end_time=None):
@@ -205,29 +267,42 @@ def habits(request):
         elif action == "import_habits":
             import_form = HabitImportForm(request.POST, request.FILES)
             if import_form.is_valid():
-                names = habit_names_from_uploaded_file(import_form.cleaned_data["file"])
+                habit_rows = habit_rows_from_uploaded_file(import_form.cleaned_data["file"])
                 created = 0
                 reactivated = 0
+                updated = 0
                 skipped = 0
                 invalid = 0
                 seen = set()
-                for name in names:
+                for row in habit_rows:
+                    name = row["name"]
                     if len(name) > 120:
+                        invalid += 1
+                        continue
+                    if row["has_schedule"] and (not row["start_time"] or not row["end_time"]):
                         invalid += 1
                         continue
                     if name in seen:
                         skipped += 1
                         continue
                     seen.add(name)
-                    status = save_habit_for_user(request.user, name)
+                    status = save_habit_for_user(
+                        request.user,
+                        name,
+                        row["start_time"],
+                        row["end_time"],
+                    )
                     if status == "created":
                         created += 1
                     elif status == "reactivated":
                         reactivated += 1
+                    elif status == "updated":
+                        updated += 1
                     else:
                         skipped += 1
-                if created or reactivated:
-                    messages.success(request, f"Imported {created + reactivated} habit(s).")
+                changed = created + reactivated + updated
+                if changed:
+                    messages.success(request, f"Imported or updated {changed} habit(s).")
                 else:
                     messages.info(request, "No new habits were imported.")
                 if skipped or invalid:
