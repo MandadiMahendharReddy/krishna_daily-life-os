@@ -1,11 +1,12 @@
 from datetime import time, timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import Habit, create_today_habits_for_user
+from .models import AccountTransaction, Habit, MoneyAccount, create_today_habits_for_user
 from .views import habit_rows_from_uploaded_file, parse_habit_time
 
 
@@ -104,3 +105,110 @@ class HabitCsvImportTests(TestCase):
         self.assertEqual(parse_habit_time("3.55 am"), time(3, 55))
         self.assertEqual(parse_habit_time("15:30"), time(15, 30))
         self.assertIsNone(parse_habit_time("bad time"))
+
+
+class MoneyLedgerTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="ledger", password="secret-pass")
+        self.client.force_login(self.user)
+        self.cash = MoneyAccount.objects.create(
+            user=self.user,
+            name="Cash",
+            account_type=MoneyAccount.ACCOUNT_CASH,
+            balance=Decimal("100.00"),
+        )
+        self.bank = MoneyAccount.objects.create(
+            user=self.user,
+            name="Bank1",
+            account_type=MoneyAccount.ACCOUNT_BANK,
+            balance=Decimal("1000.00"),
+        )
+
+    def test_expense_debits_selected_account_and_creates_transaction(self):
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "add_expense",
+                "title": "Food",
+                "category": "food",
+                "amount": "50.00",
+                "account": self.bank.pk,
+                "spent_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        self.bank.refresh_from_db()
+        self.assertEqual(self.bank.balance, Decimal("950.00"))
+        self.assertEqual(AccountTransaction.objects.count(), 1)
+        transaction = AccountTransaction.objects.get()
+        self.assertEqual(transaction.transaction_type, AccountTransaction.TYPE_EXPENSE)
+        self.assertEqual(transaction.from_account, self.bank)
+        self.assertEqual(transaction.amount, Decimal("50.00"))
+
+    def test_credit_adds_to_selected_account_and_creates_transaction(self):
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "credit_account",
+                "title": "Salary",
+                "to_account": self.bank.pk,
+                "amount": "500.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        self.bank.refresh_from_db()
+        self.assertEqual(self.bank.balance, Decimal("1500.00"))
+        transaction = AccountTransaction.objects.get(transaction_type=AccountTransaction.TYPE_CREDIT)
+        self.assertEqual(transaction.to_account, self.bank)
+        self.assertEqual(transaction.amount, Decimal("500.00"))
+
+    def test_transfer_moves_money_between_accounts_and_creates_transaction(self):
+        response = self.client.post(
+            "/expenses/",
+            {
+                "action": "transfer_account",
+                "title": "ATM withdrawal",
+                "from_account": self.bank.pk,
+                "to_account": self.cash.pk,
+                "amount": "200.00",
+                "occurred_on": timezone.localdate(),
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, "/expenses/")
+        self.bank.refresh_from_db()
+        self.cash.refresh_from_db()
+        self.assertEqual(self.bank.balance, Decimal("800.00"))
+        self.assertEqual(self.cash.balance, Decimal("300.00"))
+        transaction = AccountTransaction.objects.get(transaction_type=AccountTransaction.TYPE_TRANSFER)
+        self.assertEqual(transaction.from_account, self.bank)
+        self.assertEqual(transaction.to_account, self.cash)
+
+    def test_transaction_csv_can_be_downloaded_for_single_account(self):
+        AccountTransaction.objects.create(
+            user=self.user,
+            transaction_type=AccountTransaction.TYPE_CREDIT,
+            title="Opening",
+            amount=Decimal("100.00"),
+            to_account=self.cash,
+        )
+
+        response = self.client.get(f"/money-accounts/{self.cash.pk}/transactions.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn("Opening", response.content.decode())
+        self.assertIn("Credit", response.content.decode())
+
+    def test_expenses_page_renders_account_ledger_controls(self):
+        response = self.client.get("/expenses/")
+
+        self.assertContains(response, "Credit Account")
+        self.assertContains(response, "Transfer / Withdraw")
+        self.assertContains(response, "Download Transactions")

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import CreditCard, DailyHabit, Expense, Habit, HabitTrackingSettings, MoneyAccount, StudySession, Subscription, TodoItem
+from .models import AccountTransaction, CreditCard, DailyHabit, Expense, Habit, HabitTrackingSettings, MoneyAccount, StudySession, Subscription, TodoItem
 
 
 @admin.register(Habit)
@@ -42,6 +42,13 @@ class ExpenseAdmin(admin.ModelAdmin):
     list_display = ("title", "user", "category", "account", "amount", "spent_on")
     list_filter = ("category", "account", "spent_on")
     search_fields = ("title", "user__username")
+
+
+@admin.register(AccountTransaction)
+class AccountTransactionAdmin(admin.ModelAdmin):
+    list_display = ("title", "user", "transaction_type", "from_account", "to_account", "amount", "occurred_on")
+    list_filter = ("transaction_type", "from_account", "to_account", "occurred_on")
+    search_fields = ("title", "user__username", "from_account__name", "to_account__name")
 
 
 @admin.register(CreditCard)

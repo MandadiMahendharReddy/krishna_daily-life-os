@@ -1,10 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Reports - Krishna Daily Life OS{% endblock %}
 {% block content %}
-<h1 class="mb-3">Reports</h1>
+<div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
+  <h1 class="mb-0">Reports</h1>
+  <div class="d-flex flex-wrap gap-2 align-self-lg-start">
+    <a class="btn btn-outline-primary" href="{% url 'export_transactions_csv' %}">Download Transactions</a>
+    <a class="btn btn-outline-primary" href="{% url 'export_expenses_csv' %}">Download Expenses</a>
+  </div>
+</div>
 <div class="row g-3 mb-3">
   <div class="col-md-6"><div class="card app-card"><div class="card-body"><p class="text-muted mb-1">This Month&apos;s Expenses</p><h2>₹{{ monthly_expense|floatformat:2 }}</h2></div></div></div>
   <div class="col-md-6"><div class="card app-card"><div class="card-body"><p class="text-muted mb-1">Last 30 Days Study</p><h2>{{ study_total }} minutes</h2></div></div></div>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-lg-6"><div class="card app-card"><div class="card-body">
+    <h2 class="h5">This Month&apos;s Expenses by Account</h2>
+    {% for row in expense_account_rows %}
+      <div class="d-flex justify-content-between border-bottom py-2">
+        <span>
+          {{ row.account__name|default:"No account" }}
+          {% if row.account__account_type %}<small class="text-muted">({{ row.account__account_type|title }})</small>{% endif %}
+        </span>
+        <strong>₹{{ row.total|floatformat:2 }}</strong>
+      </div>
+    {% empty %}
+      <p class="text-muted">No expenses this month.</p>
+    {% endfor %}
+  </div></div></div>
+  <div class="col-lg-6"><div class="card app-card"><div class="card-body">
+    <h2 class="h5">Account Downloads</h2>
+    {% for account in money_accounts %}
+      <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+        <span>{{ account.name }} <small class="text-muted">({{ account.get_account_type_display }})</small></span>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'export_account_transactions_csv' account.pk %}">CSV</a>
+      </div>
+    {% empty %}
+      <p class="text-muted">No accounts yet.</p>
+    {% endfor %}
+  </div></div></div>
 </div>
 <div class="row g-3">
   <div class="col-lg-6"><div class="card app-card"><div class="card-body">

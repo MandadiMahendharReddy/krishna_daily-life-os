@@ -155,6 +155,51 @@ class Expense(TimeStampedModel):
         return f"{self.title} - {self.amount}"
 
 
+class AccountTransaction(TimeStampedModel):
+    TYPE_CREDIT = "credit"
+    TYPE_EXPENSE = "expense"
+    TYPE_TRANSFER = "transfer"
+    TYPE_CHOICES = [
+        (TYPE_CREDIT, "Credit"),
+        (TYPE_EXPENSE, "Expense"),
+        (TYPE_TRANSFER, "Transfer"),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="account_transactions")
+    transaction_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    title = models.CharField(max_length=180)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    from_account = models.ForeignKey(
+        MoneyAccount,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="outgoing_transactions",
+    )
+    to_account = models.ForeignKey(
+        MoneyAccount,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incoming_transactions",
+    )
+    expense = models.OneToOneField(
+        Expense,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="transaction",
+    )
+    occurred_on = models.DateField(default=timezone.localdate)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-occurred_on", "-created_at"]
+
+    def __str__(self):
+        return f"{self.get_transaction_type_display()} - {self.title} - {self.amount}"
+
+
 class CreditCard(TimeStampedModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="credit_cards")
     name = models.CharField(max_length=120)

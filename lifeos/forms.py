@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from .models import CreditCard, Expense, Habit, HabitTrackingSettings, MoneyAccount, StudySession, Subscription, TodoItem
 
@@ -83,6 +84,58 @@ class MoneyAccountForm(BootstrapFormMixin, forms.ModelForm):
         if balance < 0:
             raise forms.ValidationError("Balance cannot be negative.")
         return balance
+
+
+class AccountCreditForm(BootstrapFormMixin, forms.Form):
+    title = forms.CharField(max_length=180, initial="Credit")
+    to_account = forms.ModelChoiceField(queryset=MoneyAccount.objects.none(), label="Credit to")
+    amount = forms.DecimalField(max_digits=12, decimal_places=2)
+    occurred_on = forms.DateField(widget=DateInput(), initial=timezone.localdate, label="Date")
+    notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 2}), required=False)
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if user is not None:
+            self.fields["to_account"].queryset = MoneyAccount.objects.filter(user=user, active=True)
+
+    def clean_amount(self):
+        amount = self.cleaned_data["amount"]
+        if amount <= 0:
+            raise forms.ValidationError("Amount must be greater than zero.")
+        return amount
+
+
+class AccountTransferForm(BootstrapFormMixin, forms.Form):
+    title = forms.CharField(max_length=180, initial="Transfer")
+    from_account = forms.ModelChoiceField(queryset=MoneyAccount.objects.none(), label="From account")
+    to_account = forms.ModelChoiceField(queryset=MoneyAccount.objects.none(), label="To account")
+    amount = forms.DecimalField(max_digits=12, decimal_places=2)
+    occurred_on = forms.DateField(widget=DateInput(), initial=timezone.localdate, label="Date")
+    notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 2}), required=False)
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if user is not None:
+            accounts = MoneyAccount.objects.filter(user=user, active=True)
+            self.fields["from_account"].queryset = accounts
+            self.fields["to_account"].queryset = accounts
+
+    def clean_amount(self):
+        amount = self.cleaned_data["amount"]
+        if amount <= 0:
+            raise forms.ValidationError("Amount must be greater than zero.")
+        return amount
+
+    def clean(self):
+        cleaned_data = super().clean()
+        from_account = cleaned_data.get("from_account")
+        to_account = cleaned_data.get("to_account")
+        amount = cleaned_data.get("amount")
+        if from_account is not None and to_account is not None and from_account == to_account:
+            self.add_error("to_account", "Choose a different account.")
+        if from_account is not None and amount is not None and amount > from_account.balance:
+            self.add_error("amount", "Amount is more than the selected account balance.")
+        return cleaned_data
 
 
 class TodoForm(BootstrapFormMixin, forms.ModelForm):

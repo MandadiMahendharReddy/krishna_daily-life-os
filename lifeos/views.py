@@ -5,12 +5,15 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db import models, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
+from django.http import HttpResponse
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .forms import (
+    AccountCreditForm,
+    AccountTransferForm,
     CreditCardForm,
     ExpenseForm,
     HabitForm,
@@ -23,6 +26,7 @@ from .forms import (
     TodoForm,
 )
 from .models import (
+    AccountTransaction,
     CreditCard,
     DailyHabit,
     Expense,
@@ -177,6 +181,25 @@ def save_money_account_for_user(user, form):
     account.active = True
     account.save(update_fields=["account_type", "balance", "active", "updated_at"])
     return "updated"
+
+
+def account_label(account):
+    if account is None:
+        return ""
+    return f"{account.name} ({account.get_account_type_display()})"
+
+
+def create_expense_transaction(expense):
+    return AccountTransaction.objects.create(
+        user=expense.user,
+        transaction_type=AccountTransaction.TYPE_EXPENSE,
+        title=expense.title,
+        amount=expense.amount,
+        from_account=expense.account,
+        expense=expense,
+        occurred_on=expense.spent_on,
+        notes=expense.notes,
+    )
 
 
 def register(request):
@@ -396,6 +419,8 @@ def delete_todo(request, pk):
 def expenses(request):
     form = ExpenseForm(user=request.user)
     account_form = MoneyAccountForm()
+    credit_form = AccountCreditForm(user=request.user)
+    transfer_form = AccountTransferForm(user=request.user)
 
     if request.method == "POST":
         action = request.POST.get("action", "add_expense")
@@ -408,20 +433,92 @@ def expenses(request):
                 else:
                     messages.success(request, "Money account balance updated.")
                 return redirect("expenses")
-        else:
+        elif action == "credit_account":
+            credit_form = AccountCreditForm(request.POST, user=request.user)
+            if credit_form.is_valid():
+                amount = credit_form.cleaned_data["amount"]
+                with transaction.atomic():
+                    to_account = MoneyAccount.objects.select_for_update().get(
+                        pk=credit_form.cleaned_data["to_account"].pk,
+                        user=request.user,
+                    )
+                    to_account.balance += amount
+                    to_account.save(update_fields=["balance", "updated_at"])
+                    AccountTransaction.objects.create(
+                        user=request.user,
+                        transaction_type=AccountTransaction.TYPE_CREDIT,
+                        title=credit_form.cleaned_data["title"],
+                        amount=amount,
+                        to_account=to_account,
+                        occurred_on=credit_form.cleaned_data["occurred_on"],
+                        notes=credit_form.cleaned_data["notes"],
+                    )
+                messages.success(request, "Credit saved and account balance updated.")
+                return redirect("expenses")
+        elif action == "transfer_account":
+            transfer_form = AccountTransferForm(request.POST, user=request.user)
+            if transfer_form.is_valid():
+                amount = transfer_form.cleaned_data["amount"]
+                transfer_saved = False
+                with transaction.atomic():
+                    from_account = MoneyAccount.objects.select_for_update().get(
+                        pk=transfer_form.cleaned_data["from_account"].pk,
+                        user=request.user,
+                    )
+                    to_account = MoneyAccount.objects.select_for_update().get(
+                        pk=transfer_form.cleaned_data["to_account"].pk,
+                        user=request.user,
+                    )
+                    if amount > from_account.balance:
+                        transfer_form.add_error("amount", "Amount is more than the selected account balance.")
+                    else:
+                        from_account.balance -= amount
+                        to_account.balance += amount
+                        from_account.save(update_fields=["balance", "updated_at"])
+                        to_account.save(update_fields=["balance", "updated_at"])
+                        AccountTransaction.objects.create(
+                            user=request.user,
+                            transaction_type=AccountTransaction.TYPE_TRANSFER,
+                            title=transfer_form.cleaned_data["title"],
+                            amount=amount,
+                            from_account=from_account,
+                            to_account=to_account,
+                            occurred_on=transfer_form.cleaned_data["occurred_on"],
+                            notes=transfer_form.cleaned_data["notes"],
+                        )
+                        transfer_saved = True
+                if transfer_saved:
+                    messages.success(request, "Transfer saved and account balances updated.")
+                    return redirect("expenses")
+        elif action == "add_expense":
             form = ExpenseForm(request.POST, user=request.user)
             if form.is_valid():
                 expense = form.save(commit=False)
                 expense.user = request.user
+                expense_saved = False
                 with transaction.atomic():
-                    expense.save()
-                    expense.account.balance -= expense.amount
-                    expense.account.save(update_fields=["balance", "updated_at"])
-                messages.success(request, "Expense saved and account balance updated.")
-                return redirect("expenses")
+                    expense.account = MoneyAccount.objects.select_for_update().get(
+                        pk=expense.account.pk,
+                        user=request.user,
+                    )
+                    if expense.amount > expense.account.balance:
+                        form.add_error("amount", "Amount is more than the selected account balance.")
+                    else:
+                        expense.save()
+                        expense.account.balance -= expense.amount
+                        expense.account.save(update_fields=["balance", "updated_at"])
+                        create_expense_transaction(expense)
+                        expense_saved = True
+                if expense_saved:
+                    messages.success(request, "Expense saved and account balance updated.")
+                    return redirect("expenses")
 
-    items = Expense.objects.filter(user=request.user)
-    money_accounts = MoneyAccount.objects.filter(user=request.user, active=True)
+    items = Expense.objects.filter(user=request.user).select_related("account")
+    money_accounts = MoneyAccount.objects.filter(user=request.user, active=True).order_by("account_type", "name")
+    account_transactions = AccountTransaction.objects.filter(user=request.user).select_related(
+        "from_account",
+        "to_account",
+    )[:50]
     total = items.aggregate(total=Sum("amount"))["total"] or 0
     account_totals = {
         row["account_type"]: row["total"] or 0
@@ -433,8 +530,11 @@ def expenses(request):
         {
             "form": form,
             "account_form": account_form,
+            "credit_form": credit_form,
+            "transfer_form": transfer_form,
             "items": items,
             "money_accounts": money_accounts,
+            "account_transactions": account_transactions,
             "total": total,
             "total_money": money_accounts.aggregate(total=Sum("balance"))["total"] or 0,
             "cash_balance": account_totals.get(MoneyAccount.ACCOUNT_CASH, 0),
@@ -464,6 +564,67 @@ def remove_money_account(request, pk):
     account.save(update_fields=["active", "updated_at"])
     messages.success(request, "Money account removed.")
     return redirect("expenses")
+
+
+@login_required
+def export_expenses_csv(request):
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="expenses.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["Date", "Title", "Account", "Account Type", "Category", "Amount", "Notes"])
+    for expense in Expense.objects.filter(user=request.user).select_related("account"):
+        account = expense.account
+        writer.writerow(
+            [
+                expense.spent_on,
+                expense.title,
+                account.name if account else "",
+                account.get_account_type_display() if account else "",
+                expense.get_category_display(),
+                expense.amount,
+                expense.notes,
+            ]
+        )
+    return response
+
+
+@login_required
+def export_transactions_csv(request, account_pk=None):
+    account = None
+    transactions = AccountTransaction.objects.filter(user=request.user).select_related(
+        "from_account",
+        "to_account",
+    )
+    filename = "transactions.csv"
+    if account_pk is not None:
+        account = get_object_or_404(MoneyAccount, pk=account_pk, user=request.user)
+        transactions = transactions.filter(Q(from_account=account) | Q(to_account=account))
+        filename = f"{account.name.lower().replace(' ', '-')}-transactions.csv"
+
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Date", "Type", "Title", "From Account", "To Account", "Direction", "Amount", "Notes"])
+    for item in transactions:
+        direction = ""
+        if account is not None:
+            if item.to_account_id == account.id:
+                direction = "Credit"
+            elif item.from_account_id == account.id:
+                direction = "Debit"
+        writer.writerow(
+            [
+                item.occurred_on,
+                item.get_transaction_type_display(),
+                item.title,
+                account_label(item.from_account),
+                account_label(item.to_account),
+                direction,
+                item.amount,
+                item.notes,
+            ]
+        )
+    return response
 
 
 @login_required
@@ -558,6 +719,12 @@ def reports(request):
         spent_on__gte=month_start,
         spent_on__lte=today,
     )
+    expense_account_rows = (
+        monthly_expenses.values("account__id", "account__name", "account__account_type")
+        .annotate(total=Sum("amount"))
+        .order_by("account__account_type", "account__name")
+    )
+    money_accounts = MoneyAccount.objects.filter(user=request.user, active=True).order_by("account_type", "name")
     study_rows = (
         StudySession.objects.filter(user=request.user, studied_on__gte=today - timedelta(days=30))
         .values("subject")
@@ -571,6 +738,8 @@ def reports(request):
             "habit_rows": habit_rows,
             "habit_start_date": habit_settings.start_date,
             "monthly_expense": monthly_expenses.aggregate(total=Sum("amount"))["total"] or 0,
+            "expense_account_rows": expense_account_rows,
+            "money_accounts": money_accounts,
             "study_rows": study_rows,
             "study_total": StudySession.objects.filter(
                 user=request.user,
