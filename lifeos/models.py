@@ -19,10 +19,12 @@ class TimeStampedModel(models.Model):
 class Habit(TimeStampedModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="habits")
     name = models.CharField(max_length=120)
+    start_time = models.TimeField(null=True, blank=True)
+    end_time = models.TimeField(null=True, blank=True)
     active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["created_at", "name"]
+        ordering = ["start_time", "created_at", "name"]
         constraints = [
             models.UniqueConstraint(
                 fields=["user", "name"],
@@ -264,11 +266,12 @@ def create_habits_for_user_on_date(user, date):
     if date < tracking_settings.start_date:
         return DailyHabit.objects.none()
 
-    active_habit_names = list(
+    active_habits = list(
         Habit.objects.filter(user=user, active=True)
-        .order_by("created_at", "name")
-        .values_list("name", flat=True)
+        .order_by(models.F("start_time").asc(nulls_last=True), "created_at", "name")
+        .values("name", "start_time", "end_time")
     )
+    active_habit_names = [habit["name"] for habit in active_habits]
     if not active_habit_names:
         return DailyHabit.objects.none()
 
@@ -285,9 +288,18 @@ def create_habits_for_user_on_date(user, date):
         default=models.Value(len(active_habit_names)),
         output_field=models.IntegerField(),
     )
+    habit_schedule = Habit.objects.filter(
+        user=user,
+        active=True,
+        name=models.OuterRef("name"),
+    )
     return (
         DailyHabit.objects.filter(user=user, date=date, name__in=active_habit_names)
-        .annotate(habit_order=habit_order)
+        .annotate(
+            habit_order=habit_order,
+            habit_start_time=models.Subquery(habit_schedule.values("start_time")[:1]),
+            habit_end_time=models.Subquery(habit_schedule.values("end_time")[:1]),
+        )
         .order_by("habit_order", "name")
     )
 

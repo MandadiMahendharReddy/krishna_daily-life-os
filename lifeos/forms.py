@@ -9,6 +9,10 @@ class DateInput(forms.DateInput):
     input_type = "date"
 
 
+class TimeInput(forms.TimeInput):
+    input_type = "time"
+
+
 class RegisterForm(UserCreationForm):
     email = forms.EmailField(required=True)
 
@@ -36,11 +40,26 @@ class HabitTrackingSettingsForm(BootstrapFormMixin, forms.ModelForm):
 class HabitForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = Habit
-        fields = ["name"]
-        labels = {"name": "Habit name"}
+        fields = ["name", "start_time", "end_time"]
+        widgets = {"start_time": TimeInput(), "end_time": TimeInput()}
+        labels = {
+            "name": "Habit name",
+            "start_time": "Start time",
+            "end_time": "End time",
+        }
 
     def clean_name(self):
         return " ".join(self.cleaned_data["name"].split())
+
+    def clean(self):
+        cleaned_data = super().clean()
+        start_time = cleaned_data.get("start_time")
+        end_time = cleaned_data.get("end_time")
+        if not start_time:
+            self.add_error("start_time", "Start time is required.")
+        if not end_time:
+            self.add_error("end_time", "End time is required.")
+        return cleaned_data
 
 
 class HabitImportForm(BootstrapFormMixin, forms.Form):

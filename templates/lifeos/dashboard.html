@@ -25,7 +25,16 @@
         {% if habits_tracking_started %}
           {% for habit in today_habits|slice:":8" %}
             <div class="d-flex justify-content-between border-bottom py-2">
-              <span>{{ habit.name }}</span>
+              <span>
+                <span class="d-block">{{ habit.name }}</span>
+                <span class="small text-muted">
+                  {% if habit.habit_start_time and habit.habit_end_time %}
+                    {{ habit.habit_start_time|time:"g:i A" }} - {{ habit.habit_end_time|time:"g:i A" }}
+                  {% else %}
+                    Time not set
+                  {% endif %}
+                </span>
+              </span>
               <span class="badge {% if habit.completed %}text-bg-success{% else %}text-bg-secondary{% endif %}">{% if habit.completed %}Done{% else %}Pending{% endif %}</span>
             </div>
           {% empty %}

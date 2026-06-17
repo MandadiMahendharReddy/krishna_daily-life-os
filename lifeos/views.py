@@ -4,7 +4,7 @@ from datetime import timedelta
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Sum
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404, redirect, render
@@ -63,16 +63,35 @@ def habit_names_from_uploaded_file(uploaded_file):
     return names
 
 
-def save_habit_for_user(user, name):
+def save_habit_for_user(user, name, start_time=None, end_time=None):
     habit, created = Habit.objects.get_or_create(
         user=user,
         name=name,
-        defaults={"active": True},
+        defaults={
+            "active": True,
+            "start_time": start_time,
+            "end_time": end_time,
+        },
     )
-    if not created and not habit.active:
-        habit.active = True
-        habit.save(update_fields=["active", "updated_at"])
-        return "reactivated"
+    if not created:
+        update_fields = []
+        status = "skipped"
+        if not habit.active:
+            habit.active = True
+            update_fields.append("active")
+            status = "reactivated"
+        if start_time is not None and habit.start_time != start_time:
+            habit.start_time = start_time
+            update_fields.append("start_time")
+            status = "updated" if status == "skipped" else status
+        if end_time is not None and habit.end_time != end_time:
+            habit.end_time = end_time
+            update_fields.append("end_time")
+            status = "updated" if status == "skipped" else status
+        if update_fields:
+            update_fields.append("updated_at")
+            habit.save(update_fields=update_fields)
+        return status
     if created:
         return "created"
     return "skipped"
@@ -170,9 +189,16 @@ def habits(request):
         elif action == "add_habit":
             habit_form = HabitForm(request.POST)
             if habit_form.is_valid():
-                status = save_habit_for_user(request.user, habit_form.cleaned_data["name"])
+                status = save_habit_for_user(
+                    request.user,
+                    habit_form.cleaned_data["name"],
+                    habit_form.cleaned_data["start_time"],
+                    habit_form.cleaned_data["end_time"],
+                )
                 if status == "skipped":
                     messages.info(request, "That habit is already in your list.")
+                elif status == "updated":
+                    messages.success(request, "Habit time updated.")
                 else:
                     messages.success(request, "Habit saved.")
                 return redirect("habits")
@@ -209,7 +235,11 @@ def habits(request):
                 return redirect("habits")
 
     today_habits = create_today_habits_for_user(request.user)
-    active_habits = Habit.objects.filter(user=request.user, active=True)
+    active_habits = Habit.objects.filter(user=request.user, active=True).order_by(
+        models.F("start_time").asc(nulls_last=True),
+        "created_at",
+        "name",
+    )
     return render(
         request,
         "lifeos/habits.html",
