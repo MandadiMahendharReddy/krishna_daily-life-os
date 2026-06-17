@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Subscriptions - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<h1 class="mb-3">Subscriptions</h1>
+<div class="row g-3">
+  <div class="col-lg-4"><div class="card app-card"><div class="card-body"><h2 class="h5">Add Subscription</h2><form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary w-100">Save</button></form></div></div></div>
+  <div class="col-lg-8"><div class="card app-card table-card"><div class="card-body">
+    <table class="table align-middle"><thead><tr><th>Name</th><th>Renewal</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for item in items %}<tr><td>{{ item.name }}</td><td>{{ item.renewal_date }}</td><td>₹{{ item.amount|floatformat:2 }}</td><td>{% if item.is_renewal_due_soon %}<span class="badge text-bg-warning">Due soon</span>{% elif item.active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td><td><form method="post" action="{% url 'delete_subscription' item.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form></td></tr>
+    {% empty %}<tr><td colspan="5" class="text-muted">No subscriptions yet.</td></tr>{% endfor %}
+    </tbody></table>
+  </div></div></div>
+</div>
+{% endblock %}

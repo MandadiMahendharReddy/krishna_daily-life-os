@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Reports - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<h1 class="mb-3">Reports</h1>
+<div class="row g-3 mb-3">
+  <div class="col-md-6"><div class="card app-card"><div class="card-body"><p class="text-muted mb-1">This Month&apos;s Expenses</p><h2>₹{{ monthly_expense|floatformat:2 }}</h2></div></div></div>
+  <div class="col-md-6"><div class="card app-card"><div class="card-body"><p class="text-muted mb-1">Last 30 Days Study</p><h2>{{ study_total }} minutes</h2></div></div></div>
+</div>
+<div class="row g-3">
+  <div class="col-lg-6"><div class="card app-card"><div class="card-body">
+    <h2 class="h5">Last 7 Days Habit Score</h2>
+    {% for row in habit_rows %}
+      <div class="mb-3">
+        <div class="d-flex justify-content-between">
+          <span>{{ row.date }}</span>
+          {% if row.is_tracking %}
+            <strong>{{ row.score }}%</strong>
+          {% else %}
+            <strong class="text-muted">Not started</strong>
+          {% endif %}
+        </div>
+        <div class="progress">
+          <div class="progress-bar" style="width: {{ row.score }}%;"></div>
+        </div>
+      </div>
+    {% endfor %}
+  </div></div></div>
+  <div class="col-lg-6"><div class="card app-card"><div class="card-body">
+    <h2 class="h5">Study Minutes by Subject</h2>
+    {% for row in study_rows %}<div class="d-flex justify-content-between border-bottom py-2"><span>{{ row.subject|title }}</span><strong>{{ row.total }}m</strong></div>
+    {% empty %}<p class="text-muted">No study data yet.</p>{% endfor %}
+  </div></div></div>
+</div>
+{% endblock %}

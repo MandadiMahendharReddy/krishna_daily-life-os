@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Credit Cards - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<h1 class="mb-3">Credit Card Bills</h1>
+<p class="text-muted">This section is monthly. Enter the card type, bank, and due date once. The app keeps the next due date moving forward every month.</p>
+<div class="row g-3">
+  <div class="col-lg-4"><div class="card app-card"><div class="card-body"><h2 class="h5">Add Reminder</h2><form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary w-100">Save</button></form></div></div></div>
+  <div class="col-lg-8"><div class="card app-card table-card"><div class="card-body">
+    <table class="table align-middle"><thead><tr><th>Card</th><th>Bank</th><th>Monthly due</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for item in items %}<tr><td>{{ item.name }}</td><td>{{ item.bank_name }}</td><td>{{ item.due_date }}</td><td>{% if item.days_until_due < 0 %}<span class="badge text-bg-danger">Overdue</span>{% elif item.is_reminder_active %}<span class="badge text-bg-warning">Due in {{ item.days_until_due }} day{{ item.days_until_due|pluralize }}</span>{% else %}<span class="badge text-bg-secondary">Next in {{ item.days_until_due }} day{{ item.days_until_due|pluralize }}</span>{% endif %}</td><td><div class="d-flex gap-2"><form method="post" action="{% url 'delete_credit_card' item.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form></div></td></tr>
+    {% empty %}<tr><td colspan="5" class="text-muted">No card reminders yet.</td></tr>{% endfor %}
+    </tbody></table>
+  </div></div></div>
+</div>
+{% endblock %}

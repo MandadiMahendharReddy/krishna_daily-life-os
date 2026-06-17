@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-4">
+  <div>
+    <h1 class="mb-1">Dashboard</h1>
+    <p class="text-muted mb-0">Today&apos;s life system overview.</p>
+  </div>
+  <a class="btn btn-primary align-self-md-start" href="{% url 'habits' %}">Open Habits</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Habit Score</p><h2>{{ habit_score }}%</h2></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Open To-Dos</p><h2>{{ open_todos|length }}</h2></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Monthly Expense</p><h2>₹{{ monthly_expense|floatformat:2 }}</h2></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Money Left</p><h2>₹{{ total_money|floatformat:2 }}</h2></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Study Today</p><h2>{{ study_minutes_today }}m</h2></div></div></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card app-card h-100">
+      <div class="card-body">
+        <h2 class="h5">Today&apos;s Habits</h2>
+        {% if habits_tracking_started %}
+          {% for habit in today_habits|slice:":8" %}
+            <div class="d-flex justify-content-between border-bottom py-2">
+              <span>{{ habit.name }}</span>
+              <span class="badge {% if habit.completed %}text-bg-success{% else %}text-bg-secondary{% endif %}">{% if habit.completed %}Done{% else %}Pending{% endif %}</span>
+            </div>
+          {% empty %}
+            <p class="text-muted">No habits added yet.</p>
+          {% endfor %}
+        {% else %}
+          <p class="text-muted">Habit tracking starts on {{ habit_start_date }}.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card app-card h-100">
+      <div class="card-body">
+        <h2 class="h5">Monthly Reminders</h2>
+        <p class="text-muted mb-3">Credit cards repeat every month based on the due date you enter.</p>
+        <h3 class="h6 mt-3">Credit Cards</h3>
+        {% for card in credit_card_alerts %}
+          <p class="mb-2">
+            {{ card.bank_name }} {{ card.name }} due {{ card.due_date }}
+            {% if card.days_until_due < 0 %}
+              <span class="badge text-bg-danger ms-1">Overdue</span>
+            {% elif card.is_reminder_active %}
+              <span class="badge text-bg-warning ms-1">Due in {{ card.days_until_due }} day{{ card.days_until_due|pluralize }}</span>
+            {% else %}
+              <span class="badge text-bg-secondary ms-1">Next in {{ card.days_until_due }} day{{ card.days_until_due|pluralize }}</span>
+            {% endif %}
+          </p>
+        {% empty %}
+          <p class="text-muted">No credit card dues in the next 5 days.</p>
+        {% endfor %}
+        <h3 class="h6 mt-3">Subscriptions</h3>
+        {% for item in subscription_alerts %}
+          <p class="mb-2">
+            {{ item.name }} renews {{ item.renewal_date }}
+            {% if item.days_until_renewal < 0 %}
+              <span class="badge text-bg-danger ms-1">Overdue</span>
+            {% elif item.is_renewal_due_soon %}
+              <span class="badge text-bg-warning ms-1">Due in {{ item.days_until_renewal }} day{{ item.days_until_renewal|pluralize }}</span>
+            {% else %}
+              <span class="badge text-bg-secondary ms-1">Next in {{ item.days_until_renewal }} day{{ item.days_until_renewal|pluralize }}</span>
+            {% endif %}
+          </p>
+        {% empty %}
+          <p class="text-muted">No active subscriptions yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

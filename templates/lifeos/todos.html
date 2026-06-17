@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}To-Do - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<h1 class="mb-3">To-Do List</h1>
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card app-card"><div class="card-body">
+      <h2 class="h5">Add Task</h2>
+      <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary w-100">Save</button></form>
+    </div></div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card app-card table-card"><div class="card-body">
+      <table class="table align-middle">
+        <thead><tr><th>Task</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for item in items %}
+          <tr>
+            <td>{{ item.title }}</td><td>{{ item.due_date|default:"-" }}</td><td>{{ item.get_priority_display }}</td>
+            <td><form method="post" action="{% url 'toggle_todo' item.pk %}">{% csrf_token %}<button class="btn btn-sm {% if item.completed %}btn-success{% else %}btn-outline-secondary{% endif %}" type="submit">{% if item.completed %}Done{% else %}Pending{% endif %}</button></form></td>
+            <td><form method="post" action="{% url 'delete_todo' item.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form></td>
+          </tr>
+        {% empty %}<tr><td colspan="5" class="text-muted">No tasks yet.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

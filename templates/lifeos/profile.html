@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Profile - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<div class="card app-card">
+  <div class="card-body">
+    <h1 class="h4">Profile</h1>
+    <p><strong>Username:</strong> {{ user.username }}</p>
+    <p><strong>Email:</strong> {{ user.email|default:"Not set" }}</p>
+    <p class="text-muted mb-0">Your habits, tasks, expenses, reminders, and study records are stored under this account only.</p>
+  </div>
+</div>
+{% endblock %}

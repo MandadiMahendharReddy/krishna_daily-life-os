@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Expenses - Krishna Daily Life OS{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1>Expenses</h1>
+  <strong>Total spent: ₹{{ total|floatformat:2 }}</strong>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Money Left</p><h2>₹{{ total_money|floatformat:2 }}</h2></div></div></div>
+  <div class="col-md-4"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Cash</p><h2>₹{{ cash_balance|floatformat:2 }}</h2></div></div></div>
+  <div class="col-md-4"><div class="card app-card metric-card"><div class="card-body"><p class="text-muted mb-1">Bank</p><h2>₹{{ bank_balance|floatformat:2 }}</h2></div></div></div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-4">
+    <div class="card app-card h-100">
+      <div class="card-body">
+        <h2 class="h5">Add Expense</h2>
+        {% if money_accounts %}
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_expense">
+            {{ form.as_p }}
+            <button class="btn btn-primary w-100" type="submit">Save</button>
+          </form>
+        {% else %}
+          <p class="text-muted mb-0">Add cash or bank balance first.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card app-card h-100">
+      <div class="card-body">
+        <h2 class="h5">Money Account</h2>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="save_account">
+          {{ account_form.as_p }}
+          <button class="btn btn-outline-primary w-100" type="submit">Save Balance</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card app-card h-100">
+      <div class="card-body">
+        <h2 class="h5">Balances</h2>
+        {% for account in money_accounts %}
+          <div class="d-flex justify-content-between align-items-center border-bottom py-2 gap-2">
+            <div>
+              <span class="d-block">{{ account.name }}</span>
+              <small class="text-muted">{{ account.get_account_type_display }}</small>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <strong>₹{{ account.balance|floatformat:2 }}</strong>
+              <form method="post" action="{% url 'remove_money_account' account.pk %}">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+              </form>
+            </div>
+          </div>
+        {% empty %}
+          <p class="text-muted mb-0">No balances yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card app-card table-card"><div class="card-body">
+  <table class="table align-middle">
+    <thead><tr><th>Date</th><th>Title</th><th>Account</th><th>Category</th><th>Amount</th><th></th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td>{{ item.spent_on }}</td>
+        <td>{{ item.title }}</td>
+        <td>{{ item.account|default:"-" }}</td>
+        <td>{{ item.get_category_display }}</td>
+        <td>₹{{ item.amount|floatformat:2 }}</td>
+        <td><form method="post" action="{% url 'delete_expense' item.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Delete</button></form></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="text-muted">No expenses yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

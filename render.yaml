@@ -1,0 +1,26 @@
+databases:
+  - name: krishna-daily-life-os-db
+    plan: free
+    databaseName: krishna_daily_life_os
+    user: krishna_daily_life_os
+
+services:
+  - type: web
+    name: krishna-daily-life-os
+    runtime: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn config.wsgi:application"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SECURE_SSL_REDIRECT
+        value: "False"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: krishna-daily-life-os-db
+          property: connectionString
