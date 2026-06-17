@@ -70,6 +70,7 @@
                   Time not set
                 {% endif %}
               </span>
+              <span class="small text-muted d-block">Created {{ habit.created_at|date:"M j, Y" }}</span>
             </span>
             <form method="post" action="{% url 'remove_habit' habit.pk %}">
               {% csrf_token %}
